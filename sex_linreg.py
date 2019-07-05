@@ -58,12 +58,20 @@ cov_samples = set(cov.s.take(cov.count())) #sample IDs from covariates table
 phen_tb_all = phen_tb_all.filter(hl.literal(cov_samples).contains(phen_tb_all['s']),keep=True) #Only keep samples from the newly filtered covariates
 
 def get_cols(cov):
-    cols = [['phen','r2_mul','r2_adj'],['beta_{:}'.format(i) for i in cov],['beta_PC{:}'.format(i) for i in range(1, 21)],
-        ['se_{:}'.format(i) for i in cov],['se_PC{:}'.format(i) for i in range(1, 21)],
-        ['tstat_{:}'.format(i) for i in cov],['tstat_PC{:}'.format(i) for i in range(1, 21)],
-        ['pval_{:}'.format(i) for i in cov],['pval_PC{:}'.format(i) for i in range(1, 21)]]
+    cols = (['phen','r2_mul','r2_adj']+['beta_{:}'.format(i) for i in cov]+
+            ['beta_PC{:}'.format(i) for i in range(1, 21)]+['se_{:}'.format(i) for i in cov],
+            ['se_PC{:}'.format(i) for i in range(1, 21)])
     cols = [i for j in cols for i in j]
     return cols
+
+cov1 = []
+cols1 = get_cols(cov1)
+
+cov2 = ['sex']
+cols2 = get_cols(cov2)
+
+cov3 = ['age','age_square']
+cols3 = get_cols(cov3)
 
 cov1 = ['intercept','isFemale', 'age','age_square','age_isFemale','age_square_isFemale']
 cols1 = get_cols(cov1)
@@ -71,8 +79,6 @@ cols1 = get_cols(cov1)
 cov2 = ['intercept','isFemale', 'age','age_square']
 cols2 = get_cols(cov2)
 
-cov3 = ['intercept','age','age_square']
-cols3 = get_cols(cov3)
 
 
 df1 = pd.DataFrame(columns = cols1)
