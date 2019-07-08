@@ -13,6 +13,8 @@ import hail as hl
 import pandas as pd
 import datetime
 import argparse
+import numpy as np
+
 
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument('--phsource', type=str, required=True, help="phenotype source (phesant, icd10, finngen)")
@@ -24,6 +26,8 @@ args = parser.parse_args()
 paridx = args.paridx
 
 phsource = args.phsource
+
+wd = 'gs://nbaya/sex_linreg/'
 
 print('\n####################')
 print('Running phenotypes from ' + phsource)
@@ -64,26 +68,18 @@ def get_cols(cov):
     cols = [i for j in cols for i in j]
     return cols
 
-cov1 = []
-cols1 = get_cols(cov1)
+cov1 = ['intercept']
+cov2 = cov1+['sex']
+cov3 = cov1+['age','age_square']
+cov4 = np.asarray(list(set(cov2).union(set(cov3))))[[3,0,1,2]].tolist()
+cov5 = cov4 + ['age_sex','age_square_sex']
+cov6 = cov5 + ['sex_PC'+str(i) for i in range(1,21)]
 
-cov2 = ['sex']
-cols2 = get_cols(cov2)
+covs = [cov1]+[cov2]+[cov3]+[cov4]+[cov5]+[cov6] #get list of covariate lists
 
-cov3 = ['age','age_square']
-cols3 = get_cols(cov3)
+cols = [get_cols(cov) for cov in covs] #get column names for different models
 
-cov1 = ['intercept','isFemale', 'age','age_square','age_isFemale','age_square_isFemale']
-cols1 = get_cols(cov1)
-
-cov2 = ['intercept','isFemale', 'age','age_square']
-cols2 = get_cols(cov2)
-
-
-
-df1 = pd.DataFrame(columns = cols1)
-df2 = pd.DataFrame(columns = cols2)
-df3 = pd.DataFrame(columns = cols3)
+dfs = [pd.DataFrame(columns=col) for col in cols] #get list of dataframes for all models
 
 numphens = len(phenlist)
 
@@ -120,42 +116,21 @@ for i in idx:
     n = phen_tb.count()
     print('\n>>> Sample count for phenotype '+phen+': '+str(n)+' <<<')
     
-    if phen_tb.filter(phen_tb.isFemale == 1).count() % n != 0: #if phenotype is not sex-specific (i.e. all female or all male)
-        # regression 1: All covariates
-        cov_list1 = [ phen_tb['isFemale'], phen_tb['age'], phen_tb['age_squared'], phen_tb['age_isFemale'],
-                    phen_tb['age_squared_isFemale'] ]+ [phen_tb['PC{:}'.format(i)] for i in range(1, 21)] 
-        reg1 = phen_tb.aggregate(hl.agg.linreg(y=phen_tb.phen, x = [1]+cov_list1))
-        stats1 = [[phen],[reg1.multiple_r_squared,reg1.adjusted_r_squared],reg1.beta,
-                  reg1.standard_error,reg1.t_stat,reg1.p_value]
-        stats1 = [i for j in stats1 for i in j] #flatten list
-
-        df1.loc[i] = stats1
-
-        # regression 2: All covariates except for sex*age and sex*age2
-        cov_list2 = [ phen_tb['isFemale'], phen_tb['age'], phen_tb['age_squared'] 
-                    ]+[phen_tb['PC{:}'.format(i)] for i in range(1, 21)] 
-        reg2 = phen_tb.aggregate(hl.agg.linreg(y=phen_tb.phen, x = [1]+cov_list2))
-        stats2 = [[phen],[reg2.multiple_r_squared,reg2.adjusted_r_squared],reg2.beta,
-                  reg2.standard_error,reg2.t_stat,reg2.p_value]
-        stats2 = [i for j in stats2 for i in j] #flatten list
-
-        df2.loc[i] = stats2
+    for cov_i, cov in enumerate(covs):
+        if 'sex' not in cov or phen_tb.filter(phen_tb.isFemale == 1).count() % n != 0: #don't run regression if sex in cov AND trait is sex specific
+            cov_list = [phen_tb[x.replace('sex','isFemale')] for x in cov if x is not 'intercept']
+            reg = phen_tb.aggregate(hl.agg.linreg(y=phen_tb.phen, x = [1]+cov_list))
+            stats = [phen,reg.multiple_r_squared,reg.adjusted_r_squared,reg.beta,
+                      reg.standard_error]
+            stats = [i for j in stats for i in j] #flatten list
+            dfs[cov_i].loc[i] = stats #enter regression result in df at index cov_i in dfs, list of dataframes
         
-    # regression 3: All covariates except for sex, sex*age and sex*age2
-    cov_list3 = [ phen_tb['age'], phen_tb['age_squared'] ]+[phen_tb['PC{:}'.format(i)] for i in range(1, 21)] 
-    reg3 = phen_tb.aggregate(hl.agg.linreg(y=phen_tb.phen, x = [1]+cov_list3))
-    stats3 = [[phen],[reg3.multiple_r_squared,reg3.adjusted_r_squared],reg3.beta,
-              reg3.standard_error,reg3.t_stat,reg3.p_value]
-    stats3 = [i for j in stats3 for i in j] #flatten list
-    
-    df3.loc[i] = stats3
-    
     stoptime = datetime.datetime.now()
 
     print('\n############')
     print('Iteration time for '+phen+': '+str(round((stoptime-starttime).seconds/60, 2))+' minutes')
     print('############')
           
-hl.Table.from_pandas(df1).export('gs://nbaya/linreg/ukb31063.'+phsource+'_phenotypes.both_sexes.reg1_batch'+str(args.paridx)+'.tsv.bgz',header=True)
-hl.Table.from_pandas(df2).export('gs://nbaya/linreg/ukb31063.'+phsource+'_phenotypes.both_sexes.reg2_batch'+str(args.paridx)+'.tsv.bgz',header=True)
-hl.Table.from_pandas(df3).export('gs://nbaya/linreg/ukb31063.'+phsource+'_phenotypes.both_sexes.reg3_batch'+str(args.paridx)+'.tsv.bgz',header=True)
+hl.Table.from_pandas(df1).export(wd+'ukb31063.'+phsource+'_phenotypes.both_sexes.reg1_batch'+str(args.paridx)+'.tsv.bgz',header=True)
+hl.Table.from_pandas(df2).export(wd+'ukb31063.'+phsource+'_phenotypes.both_sexes.reg2_batch'+str(args.paridx)+'.tsv.bgz',header=True)
+hl.Table.from_pandas(df3).export(wd+'ukb31063.'+phsource+'_phenotypes.both_sexes.reg3_batch'+str(args.paridx)+'.tsv.bgz',header=True)
