@@ -5,7 +5,7 @@ Created on Tue Oct 23 11:58:10 2018
 
 Phenotypic association of sex for all phenotypes in UK Biobank Round 2.
 
-Three related models of linear regression, with progressively fewer sex-related predictors.
+Nested linear regression models, without genotypes.
 
 @author: nbaya
 """
@@ -23,59 +23,68 @@ parser.add_argument('--paridx', type=int, required=True, help="batch id number")
 
 args = parser.parse_args()
 
-paridx = args.paridx
-
 phsource = args.phsource
+parsplit = args.parsplit
+paridx = args.paridx
 
 wd = 'gs://nbaya/sex_linreg/'
 
 print('\n####################')
 print('Running phenotypes from ' + phsource)
-print('Number of parsplit batches: ' + str(args.parsplit))
-print('Batch paridx: ' + str(args.paridx))
+print('Number of parsplit batches: ' + str(parsplit))
+print('Batch paridx: ' + str(paridx))
 print('####################')
 
-if phsource == 'icd10':
-    phen_tb_all = hl.import_table('gs://nbaya/linreg/icd10_phenotypes.both_sexes.tsv.bgz',missing='',impute=True)
-elif phsource == 'phesant':
-    phen_tb_all = hl.import_table('gs://phenotype_31063/ukb31063.phesant_phenotypes.both_sexes.tsv.bgz',missing='',impute=True,types={'"userId"': hl.tstr}).rename({'"userId"': 's'})
+      
+if phsource == 'phesant':
+    phen_tb_path = 'gs://ukb31063/ukb31063.PHESANT_January_2019.both_sexes.tsv.bgz'
 elif phsource == 'finngen':
-    phen_tb_all = hl.import_table('gs://ukb31063-mega-gwas/phenotype-files/curated-phenotypes/2018-04-06_ukb-finngen-pheno-for-analysis.tsv',missing='',impute=True,types={'eid':hl.tstr}).rename({'eid':'s'})
-phen_tb_all = phen_tb_all.annotate(s = hl.str(phen_tb_all.s))
-phen_tb_all = phen_tb_all.key_by('s')
+    phen_tb_path = 'gs://ukb31063/ukb31063.FINNGEN_phenotypes.both_sexes.tsv.bgz'
+elif phsource == 'icd10':
+    phen_tb_path = 'gs://ukb31063/ukb31063.ICD10_phenotypes.both_sexes.tsv.bgz'
+
+phen_tb_all = hl.import_table(phen_tb_path,missing='',impute=True,types={'s': hl.tstr}, key='s')
 
 phenlist = [x.replace('\"','') for x in phen_tb_all.row_value][0:]
 
-cov =  hl.import_table('gs://phenotype_31063/ukb31063.gwas_covariates.both_sexes.tsv',
-                             key='s', impute=True, types={'s': hl.tstr})
-cov = cov.annotate(age = cov.age - cov.aggregate(hl.agg.mean(cov.age))) #center age
-cov = cov.annotate(age_squared = cov.age**2)
-cov = cov.annotate(age_isFemale = cov.age*cov.isFemale)
-cov = cov.annotate(age_squared_isFemale = cov.age_squared*cov.isFemale)
+cov_tb =  hl.import_table('gs://ukb31063/ukb31063.neale_gwas_covariates.both_sexes.tsv.bgz',
+                          key='s', impute=True, types={'s': hl.tstr})
+cov_tb = cov_tb.annotate(age = cov_tb.age - cov_tb.aggregate(hl.agg.mean(cov_tb.age))) #center age
+cov_tb = cov_tb.annotate(age_squared = cov_tb.age**2)
+cov_tb = cov_tb.annotate(age_isFemale = cov_tb.age*cov_tb.isFemale)
+cov_tb = cov_tb.annotate(age_squared_isFemale = cov_tb.age_squared*cov_tb.isFemale)
+cov_tb = cov_tb.annotate(**{f'isFemale_PC{i}':cov_tb.isFemale*cov_tb[f'PC{i}'] for i in range(1,21)})
+cov_tb.show()
 
-withdrawn = hl.import_table('gs://nbaya/w31063_20181016.csv',missing='',no_header=True)
-withdrawn_set = set(withdrawn.f0.take(withdrawn.count()))
+withdrawn = hl.import_table('gs://nbaya/w31063_20181016.csv',missing='',no_header=True).key_by('f0')
+#withdrawn_set = set(withdrawn.f0.take(withdrawn.count()))
+#cov_tb = cov_tb.filter(hl.literal(withdrawn_set).contains(cov_tb['s']),keep=False) #Remove withdrawn samples from covariates
+cov_tb = cov_tb.filter(hl.is_defined(withdrawn[cov_tb.s]),keep=False) #Remove withdrawn samples from covariates
 
-cov = cov.filter(hl.literal(withdrawn_set).contains(cov['s']),keep=False) #Remove withdrawn samples from covariates
+#cov_samples = set(cov_tb.s.collect()) #sample IDs from covariates table
+#phen_tb_all = phen_tb_all.filter(hl.literal(cov_samples).contains(phen_tb_all['s']),keep=True) #Only keep samples from the newly filtered covariates
+phen_tb_all = phen_tb_all.filter(hl.is_defined(cov_tb[phen_tb_all.s]))
 
-cov_samples = set(cov.s.take(cov.count())) #sample IDs from covariates table
-phen_tb_all = phen_tb_all.filter(hl.literal(cov_samples).contains(phen_tb_all['s']),keep=True) #Only keep samples from the newly filtered covariates
+print(f'Number of individuals: {phen_tb_all.count()}')
+#print(phen_tb_all.describe())
+#print(cov_tb.describe())
 
 def get_cols(cov):
     cols = (['phen','r2_mul','r2_adj']+['beta_{:}'.format(i) for i in cov]+
-            ['beta_PC{:}'.format(i) for i in range(1, 21)]+['se_{:}'.format(i) for i in cov],
-            ['se_PC{:}'.format(i) for i in range(1, 21)])
-    cols = [i for j in cols for i in j]
+            ['se_{:}'.format(i) for i in cov])
     return cols
 
 cov1 = ['intercept']
 cov2 = cov1+['sex']
-cov3 = cov1+['age','age_square']
-cov4 = np.asarray(list(set(cov2).union(set(cov3))))[[3,0,1,2]].tolist()
-cov5 = cov4 + ['age_sex','age_square_sex']
+cov3 = cov1+['age','age_squared'] #already has some phenotypes completed
+cov4 = np.asarray(list(set(cov2).union(set(cov3))))[[3,0,1,2]].tolist() #reorder so that intercept is first, already has some phenotypes completed
+cov5 = cov4 + ['age_sex','age_squared_sex'] # already has some phenotypes completed
 cov6 = cov5 + ['sex_PC'+str(i) for i in range(1,21)]
 
 covs = [cov1]+[cov2]+[cov3]+[cov4]+[cov5]+[cov6] #get list of covariate lists
+covs = [cov+[f'PC{i}' for i in range(1,21)] for cov in covs] #add PCs to the end of the list of covariates
+
+[print(cov) for cov in covs]
 
 cols = [get_cols(cov) for cov in covs] #get column names for different models
 
@@ -84,53 +93,49 @@ dfs = [pd.DataFrame(columns=col) for col in cols] #get list of dataframes for al
 numphens = len(phenlist)
 
 start_idx = int((paridx-1)*numphens/args.parsplit)
-stop_idx = int((paridx)*numphens/args.parsplit)
-idx = range(start_idx,stop_idx,1) #chunks all phenotypes into parsplit number of chunks, then runs on the paridx-th chunk
+stop_idx = int((paridx)*numphens/parsplit)
+idx = range(start_idx,stop_idx,1) #chunks all phenotypes for phsource into parsplit number of chunks, then runs on the paridx-th chunk
 
 for i in idx:
     phen = phenlist[i]
     
+    print('\n############')
+    print(f'Running phenotype {phen} (iter {i+1})')
+    print(f'iter {idx.index(i)+1} of {len(idx)} for parallel batch {paridx}')
     print('############')
-    print('Running phenotype '+phen+' (iter '+str(i+1)+')')
-    print('iter '+str(idx.index(i)+1)+' of '+str(len(idx))+' for parallel batch '+str(paridx))
     starttime = datetime.datetime.now()
-    print('############')
     
-    if phsource == 'phesant':
-        phen_tb = phen_tb_all.select('"'+phen+'"').join(cov, how='inner') #join phenotype and covariates    
-        phen_tb = phen_tb.annotate(phen_str = hl.str(phen_tb['"'+phen+'"']))
-        phen_tb = phen_tb.filter(phen_tb.phen_str == '',keep=False)
-        if phen_tb['"'+phen+'"'].dtype == hl.dtype('bool'):
-            phen_tb = phen_tb.annotate(phen = hl.bool(phen_tb.phen_str.replace('\"',''))).drop('"'+phen+'"')
-        else:
-            phen_tb = phen_tb.annotate(phen = hl.float64(phen_tb.phen_str.replace('\"',''))).drop('"'+phen+'"')
-    elif phsource == 'icd10' or phsource == 'finngen':
-        phen_tb = phen_tb_all.select(phen).join(cov, how='inner') #join phenotype and covariates    
-        phen_tb = phen_tb.annotate(phen_str = hl.str(phen_tb[phen]))
-        phen_tb = phen_tb.filter(phen_tb.phen_str == '',keep=False)
-        if phen_tb[phen].dtype == hl.dtype('bool'):
-            phen_tb = phen_tb.annotate(phen = hl.bool(phen_tb.phen_str)).drop(phen)
-        else:
-            phen_tb = phen_tb.annotate(phen = hl.float64(phen_tb.phen_str.replace('\"',''))).drop(phen)
+    phen_tb = phen_tb_all.select(phen).join(cov_tb, how='inner') #join phenotype and covariate table
+    phen_tb = phen_tb.annotate(phen_str = hl.str(phen_tb[phen]))
+    phen_tb = phen_tb.filter(phen_tb.phen_str == '',keep=False)
+    if phen_tb[phen].dtype == hl.dtype('bool'):
+        phen_tb = phen_tb.annotate(phen = hl.bool(phen_tb.phen_str.replace('\"','')))
+    else:
+        phen_tb = phen_tb.annotate(phen = hl.float64(phen_tb.phen_str.replace('\"','')))
             
     n = phen_tb.count()
-    print('\n>>> Sample count for phenotype '+phen+': '+str(n)+' <<<')
+    print(f'\n>>> Sample count for phenotype {phen}: {n} <<<')
     
     for cov_i, cov in enumerate(covs):
-        if 'sex' not in cov or phen_tb.filter(phen_tb.isFemale == 1).count() % n != 0: #don't run regression if sex in cov AND trait is sex specific
-            cov_list = [phen_tb[x.replace('sex','isFemale')] for x in cov if x is not 'intercept']
-            reg = phen_tb.aggregate(hl.agg.linreg(y=phen_tb.phen, x = [1]+cov_list))
-            stats = [phen,reg.multiple_r_squared,reg.adjusted_r_squared,reg.beta,
-                      reg.standard_error]
-            stats = [i for j in stats for i in j] #flatten list
-            dfs[cov_i].loc[i] = stats #enter regression result in df at index cov_i in dfs, list of dataframes
+        cov = cov.copy()
+        if cov_i+1 < 3 or cov_i+1 == 6: #only run models 1, 2, 6 (3,4,5 already complete)
+            print(f'\nRunning model {cov_i+1} for phen {phen}\ncovs: {cov}')
+            if 'sex' not in cov or phen_tb.filter(phen_tb.isFemale == 1).count() % n != 0: #don't run regression if sex in cov AND trait is sex specific
+                if 'intercept' in cov:
+                    cov.remove('intercept')
+                cov_list = [phen_tb[x.replace('sex','isFemale')] for x in cov]
+                reg = phen_tb.aggregate(hl.agg.linreg(y=phen_tb.phen, x = [1]+cov_list))
+                stats = [[phen],[reg.multiple_r_squared,reg.adjusted_r_squared],
+                         reg.beta,reg.standard_error]
+                stats = [i for j in stats for i in j] #flatten list
+                dfs[cov_i].loc[i] = stats #enter regression result in df at index cov_i in dfs, list of dataframes
         
     stoptime = datetime.datetime.now()
 
-    print('\n############')
-    print('Iteration time for '+phen+': '+str(round((stoptime-starttime).seconds/60, 2))+' minutes')
-    print('############')
-          
-hl.Table.from_pandas(df1).export(wd+'ukb31063.'+phsource+'_phenotypes.both_sexes.reg1_batch'+str(args.paridx)+'.tsv.bgz',header=True)
-hl.Table.from_pandas(df2).export(wd+'ukb31063.'+phsource+'_phenotypes.both_sexes.reg2_batch'+str(args.paridx)+'.tsv.bgz',header=True)
-hl.Table.from_pandas(df3).export(wd+'ukb31063.'+phsource+'_phenotypes.both_sexes.reg3_batch'+str(args.paridx)+'.tsv.bgz',header=True)
+    print('\n############'+
+          f'\nIteration time for {phen} in {phsource} (n: {n}): {round((stoptime-starttime).seconds/60, 2)} minutes'+
+          '\n############')
+
+for df_i, df in enumerate(dfs):
+    if df_i+1 < 3 or df_i+1 == 6: #only run models 1, 2, 6 (3,4,5 already complete)
+        hl.Table.from_pandas(df).export(wd+'batches/'+'ukb31063.'+phsource+f'_phenotypes.both_sexes.reg{df_i+1}_batch'+str(args.paridx)+'.tsv.bgz',header=True)
