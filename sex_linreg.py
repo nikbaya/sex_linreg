@@ -74,15 +74,15 @@ def get_cols(cov):
             ['se_{:}'.format(i) for i in cov])
     return cols
 
-cov1 = ['intercept']
-cov2 = cov1+['sex']
-cov3 = cov1+['age','age_squared'] #already has some phenotypes completed
-cov4 = np.asarray(list(set(cov2).union(set(cov3))))[[3,0,1,2]].tolist() #reorder so that intercept is first, already has some phenotypes completed
+cov1 = []
+cov2 = ['sex']
+cov3 = ['age','age_squared'] #already has some phenotypes completed
+cov4 = cov2+cov3 
 cov5 = cov4 + ['age_sex','age_squared_sex'] # already has some phenotypes completed
 cov6 = cov5 + ['sex_PC'+str(i) for i in range(1,21)]
 
 covs = [cov1]+[cov2]+[cov3]+[cov4]+[cov5]+[cov6] #get list of covariate lists
-covs = [cov+[f'PC{i}' for i in range(1,21)] for cov in covs] #add PCs to the end of the list of covariates
+covs = [['intercept']+cov+[f'PC{i}' for i in range(1,21)] for cov in covs] #add PCs to the end of the list of covariates
 
 [print(cov) for cov in covs]
 
@@ -119,7 +119,7 @@ for i in idx:
     for cov_i, cov in enumerate(covs):
         cov = cov.copy()
         if cov_i+1 < 3 or cov_i+1 == 6: #only run models 1, 2, 6 (3,4,5 already complete)
-            print(f'\nRunning model {cov_i+1} for phen {phen}\ncovs: {cov}')
+            print(f'\nRunning model {cov_i+1} for phen {phen}\ncovs: {cov}\ncols: {cols[cov_i]}')
             if 'sex' not in cov or phen_tb.filter(phen_tb.isFemale == 1).count() % n != 0: #don't run regression if sex in cov AND trait is sex specific
                 if 'intercept' in cov:
                     cov.remove('intercept')
