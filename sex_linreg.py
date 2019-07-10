@@ -13,7 +13,8 @@ import hail as hl
 import pandas as pd
 import datetime
 import argparse
-import numpy as np
+#import numpy as np
+import random
 
 
 parser = argparse.ArgumentParser(add_help=False)
@@ -45,7 +46,15 @@ elif phsource == 'icd10':
 
 phen_tb_all = hl.import_table(phen_tb_path,missing='',impute=True,types={'s': hl.tstr}, key='s')
 
-phenlist = [x.replace('\"','') for x in phen_tb_all.row_value][0:]
+#phenlist = [x.replace('\"','') for x in phen_tb_all.row_value][0:]
+curr = hl.import_table('gs://nbaya/sex_linreg/ukb31063.phesant_phenotypes.both_sexes.reg1.tsv.bgz',impute=True)
+prev = hl.import_table('gs://nbaya/sex_linreg/ukb31063.phesant_phenotypes.Nov2018.both_sexes.reg3.tsv.bgz',impute=True)
+curr_phens = set(curr.phen.collect()) #list of phesant phens from Jan 2019
+prev_phens = set(prev.phen.collect()) #list of phesant phens from Nov 2018 version
+intersect = list(curr_phens.intersection(prev_phens)) #get phenotypes common across both version
+random.shuffle(intersect) #randomly shuffle common phenotypes
+print(f'Number of phenotypes to be updated: {len(curr_phens.difference(prev_phens))}')
+phenlist = list(curr_phens.difference(prev_phens))+[intersect[:10]] #add 10 phenotypes that are common across both versions to verify that models are working the same way
 
 cov_tb =  hl.import_table('gs://ukb31063/ukb31063.neale_gwas_covariates.both_sexes.tsv.bgz',
                           key='s', impute=True, types={'s': hl.tstr})
