@@ -74,7 +74,7 @@ cov_tb = cov_tb.filter(hl.is_defined(withdrawn[cov_tb.s]),keep=False) #Remove wi
 #phen_tb_all = phen_tb_all.filter(hl.literal(cov_samples).contains(phen_tb_all['s']),keep=True) #Only keep samples from the newly filtered covariates
 phen_tb_all = phen_tb_all.filter(hl.is_defined(cov_tb[phen_tb_all.s]))
 
-print(f'Number of individuals: {phen_tb_all.count()}')
+print(f'\nNumber of individuals: {phen_tb_all.count()}')
 #print(phen_tb_all.describe())
 #print(cov_tb.describe())
 
@@ -105,12 +105,12 @@ start_idx = int((paridx-1)*numphens/args.parsplit)
 stop_idx = int((paridx)*numphens/parsplit)
 idx = range(start_idx,stop_idx,1) #chunks all phenotypes for phsource into parsplit number of chunks, then runs on the paridx-th chunk
 
-for i in idx:
+for i in idx[:1]:
     phen = phenlist[i]
     
     print('\n############')
     print(f'Running phenotype {phen} (iter {i+1})')
-    print(f'iter {idx.index(i)+1} of {len(idx)} for parallel batch {paridx}')
+    print(f'iter {idx.index(i)+1} of {len(idx)} for parallel batch {paridx} of {parsplit}')
     print('############')
     starttime = datetime.datetime.now()
     
@@ -127,9 +127,9 @@ for i in idx:
     
     for cov_i, cov in enumerate(covs):
         cov = cov.copy()
-        if cov_i+1 >= 3 or cov_i+1 <6: #only run models 3,4,5
-            print(f'\nRunning model {cov_i+1} for phen {phen}\ncovs: {cov}\ncols: {cols[cov_i]}')
+        if cov_i+1 in [3,4,5]: #only run models 3,4,5
             if 'sex' not in cov or phen_tb.filter(phen_tb.isFemale == 1).count() % n != 0: #don't run regression if sex in cov AND trait is sex specific
+                print(f'\n############\nRunning linreg model {cov_i+1} for phen {phen}\n############\n')
                 if 'intercept' in cov:
                     cov.remove('intercept')
                 cov_list = [phen_tb[x.replace('sex','isFemale')] for x in cov]
@@ -138,13 +138,18 @@ for i in idx:
                          reg.beta,reg.standard_error]
                 stats = [i for j in stats for i in j] #flatten list
                 dfs[cov_i].loc[i] = stats #enter regression result in df at index cov_i in dfs, list of dataframes
+                print(f'\nCompleted running model {cov_i+1} for phen {phen}')
+            else:
+                print(f'\n#############\nWARNING: Trait is sex-specific. Not able to use sex as a covariate for model {cov_i+1}.\n###########\n')
         
     stoptime = datetime.datetime.now()
+    
+    print(dfs)
 
     print('\n############'+
           f'\nIteration time for {phen} in {phsource} (n: {n}): {round((stoptime-starttime).seconds/60, 2)} minutes'+
           '\n############')
 
 for df_i, df in enumerate(dfs):
-    if df_i+1 >= 3 or df_i+1 <6: #only run models 3,4,5
+    if df_i+1 in [3,4,5]: #only run models 3,4,5
         hl.Table.from_pandas(df).export(wd+'batches/'+'ukb31063.'+phsource+f'_phenotypes.both_sexes.reg{df_i+1}_batch'+str(20+args.paridx)+'.tsv.bgz',header=True)
