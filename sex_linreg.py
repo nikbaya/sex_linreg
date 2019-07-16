@@ -118,7 +118,7 @@ for i in idx:
     
     for cov_i, cov in enumerate(covs):
         cov = cov.copy()
-        if cov_i+1 < 3 or cov_i+1 == 6: #only run models 1, 2, 6 (3,4,5 already complete)
+        if cov_i+1 in [3,4,5]: #only run models 3,4,5
             print(f'\nRunning model {cov_i+1} for phen {phen}\ncovs: {cov}\ncols: {cols[cov_i]}')
             if 'sex' not in cov or phen_tb.filter(phen_tb.isFemale == 1).count() % n != 0: #don't run regression if sex in cov AND trait is sex specific
                 if 'intercept' in cov:
@@ -137,5 +137,8 @@ for i in idx:
           '\n############')
 
 for df_i, df in enumerate(dfs):
-    if df_i+1 < 3 or df_i+1 == 6: #only run models 1, 2, 6 (3,4,5 already complete)
-        hl.Table.from_pandas(df).export(wd+'batches/'+'ukb31063.'+phsource+f'_phenotypes.both_sexes.reg{df_i+1}_batch'+str(args.paridx)+'.tsv.bgz',header=True)
+    if df_i+1 in [3,4,5]: #only run models 3,4,5
+        try:
+            hl.Table.from_pandas(df).export(wd+'batches/'+'ukb31063.'+phsource+f'_phenotypes.both_sexes.reg{df_i+1}_batch'+str(20+args.paridx)+'.tsv.bgz',header=True)
+        except ValueError:
+            print(f'The dataframe for model {df_i+1} is empty.\n\n{df}')
