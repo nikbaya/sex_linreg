@@ -14,130 +14,147 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
+import scipy.stats as stats
 
-###############################################################################
+
 """
-For nested linreg models
+For nested linreg models:
+    
+    1) y ~ intercept + 20 PCs
+    2) y ~ intercept + 20 PCs + sex 
+    3) y ~ intercept + 20 PCs + age + age^2
+    4) y ~ intercept + 20 PCs + sex + age + age^2
+    5) y ~ intercept + 20 PCs + sex + age + sex*age
+    6) y ~ intercept + 20 PCs + sex + age + sex*age + sex*age^2
+
 """
+
+sex_linreg_wd = '/Users/nbaya/Documents/lab/ukbb-sexdiff/sex_linreg'
 
 phsource_list = ['phesant','icd10','finngen']
 
+
+reg_list = list(range(1,7))
 
 
 """
 Copy all sumstats from gcloud
 """
 for phsource in phsource_list:
-    for reg in list(range(1,4)):
+    for reg in reg_list:
         reg = str(reg)
-        if not os.path.isfile('/Users/nbaya/Documents/lab/ukbb-sexdiff/sex_linreg/ukb31063.'+phsource+'_phenotypes.both_sexes.reg'+reg+'.tsv.bgz'):
-            os.system('gsutil cp gs://nbaya/sex_linreg/ukb31063.'+phsource+'_phenotypes.both_sexes.reg'+reg+'.tsv.bgz ~/Documents/lab/ukbb-sexdiff/sex_linreg/')
+        reg_fname=f'ukb31063.{phsource}_phenotypes.both_sexes.reg{reg}.tsv.bgz'
+        if not os.path.isfile(f'{sex_linreg_wd}/{reg_fname}'):
+            os.system(f'gsutil cp gs://nbaya/sex_linreg/{reg_fname} {sex_linreg_wd}')
 
 """
 Create pandas dataframes
 """
-phsource = phsource_list[0]
-reg1 = pd.read_csv('~/Documents/lab/ukbb-sexdiff/sex_linreg/ukb31063.'+phsource+'_phenotypes.both_sexes.reg1.tsv.bgz',
-                   compression='gzip',sep='\t')
-reg1.insert(0,'source',phsource)
-reg2 = pd.read_csv('~/Documents/lab/ukbb-sexdiff/sex_linreg/ukb31063.'+phsource+'_phenotypes.both_sexes.reg2.tsv.bgz',
-                   compression='gzip',sep='\t')
-reg2.insert(0,'source',phsource)
-reg3 = pd.read_csv('~/Documents/lab/ukbb-sexdiff/sex_linreg/ukb31063.'+phsource+'_phenotypes.both_sexes.reg3.tsv.bgz',
-                   compression='gzip',sep='\t')
-reg3.insert(0,'source',phsource)
+phsource_list = ['phesant']#, 'finngen']
 
-reg1_old = pd.read_csv('~/Documents/lab/ukbb-sexdiff/sex_linreg/ukb31063.'+phsource+'_phenotypes.both_sexes.reg1_old1.tsv.bgz',
-                   compression='gzip',sep='\t')
-reg1_old.insert(0,'source',phsource)
-reg2_old = pd.read_csv('~/Documents/lab/ukbb-sexdiff/sex_linreg/ukb31063.'+phsource+'_phenotypes.both_sexes.reg2_old1.tsv.bgz',
-                   compression='gzip',sep='\t')
-reg2_old.insert(0,'source',phsource)
-reg3_old = pd.read_csv('~/Documents/lab/ukbb-sexdiff/sex_linreg/ukb31063.'+phsource+'_phenotypes.both_sexes.reg3_old1.tsv.bgz',
-                   compression='gzip',sep='\t')
-reg3_old.insert(0,'source',phsource)
+def get_reg(reg, phsource):
+    r'''
+    Get regression results for regression model number `reg` and phsource `phsource`
+    '''
+    reg_fname=f'ukb31063.{phsource}_phenotypes.both_sexes.reg{reg}.tsv.bgz'
+    reg_df = pd.read_csv(f'{sex_linreg_wd}/{reg_fname}', compression='gzip',sep='\t')
+    reg_df.insert(0,'source',phsource) #put phsource in first column
+    reg_df.insert(1,'reg',reg) #put regression index in second column
+    return reg_df
+
+reg_df_list = [[get_reg(reg=reg, phsource=phsource) for reg in reg_list] for phsource in phsource_list]
+
+reg_df = pd.concat(*reg_df_list, ignore_index=True)
+
+## get UKB round 2 h2 results
+def get_h2(phsource):
+    h2_results_path=f'/Users/nbaya/Documents/lab/ukbb-sexdiff/rg_sex/ukbb31063.both_sexes.h2part_results.{"v2." if phsource=="phesant" else ""}{phsource}.tsv.gz'
+    h2 = pd.read_csv(h2_results_path, sep='\t',compression='gzip')
+    h2 = h2.rename(index=str,columns={'phenotype':'phen'}).iloc[:,0:20]
+    return h2
 
 
-for phsource_idx in range(1,3):
-    phsource = phsource_list[phsource_idx]
-    reg1_temp = pd.read_csv('~/Documents/lab/ukbb-sexdiff/sex_linreg/ukb31063.'+phsource+'_phenotypes.both_sexes.reg1.tsv.bgz',compression='gzip',sep='\t')
-    reg1_temp.insert(0,'source',phsource)
-    reg1 = reg1.append(reg1_temp, ignore_index = True)
-    reg2_temp = pd.read_csv('~/Documents/lab/ukbb-sexdiff/sex_linreg/ukb31063.'+phsource+'_phenotypes.both_sexes.reg2.tsv.bgz',compression='gzip',sep='\t')
-    reg2_temp.insert(0,'source',phsource)
-    reg2 = reg2.append(reg2_temp, ignore_index = True)
-    reg3_temp = pd.read_csv('~/Documents/lab/ukbb-sexdiff/sex_linreg/ukb31063.'+phsource+'_phenotypes.both_sexes.reg3.tsv.bgz',compression='gzip',sep='\t')
-    reg3_temp.insert(0,'source',phsource)
-    reg3 = reg3.append(reg3_temp, ignore_index = True)
+h2_list = [get_h2(phsource=phsource) for phsource in phsource_list]
+h2 = pd.concat(h2_list, ignore_index=True) # dataframe with h2
 
-#get UKB round 2 h2 results
-phsource = phsource_list[0]
-h2 = pd.read_csv('~/Documents/lab/ukbb-sexdiff/rg_sex/ukbb31063.both_sexes.h2part_results.'+phsource+'.tsv.gz', 
-                              sep='\t',compression='gzip').rename(index=str,columns={'phenotype':'phen'}).iloc[:,0:20]
+## remove "_irnt" suffix from h2 phens with irnt suffix
+#h2[h2.phen.str.contains('irnt')].phen #lists all phens with irnt suffix
+h2['phen'] = h2.applymap(lambda x: str(x).replace('_irnt','')).phen 
 
-for phsource_idx in range(1,3):
-    phsource = phsource_list[phsource_idx]
-    h2 = h2.append(pd.read_csv('~/Documents/lab/ukbb-sexdiff/rg_sex/ukbb31063.both_sexes.h2part_results.'+phsource+'.tsv.gz', 
-                              sep='\t',compression='gzip').iloc[:,0:20].rename(index=str,columns={'phenotype':'phen'}))
-
-#remove "_irnt" suffix from h2 phens with irnt suffix
-h2[h2.phen.str.contains('irnt')].phen #lists all phens with irnt suffix
-
-h2['phen'] = h2.applymap(lambda x: str(x).replace('_irnt','')).phen
-
-#combine sumstats (reg1, reg2, reg3) with heritability results (h2)
+## combine sumstats (reg1, reg2, reg3) with heritability results (h2)
 keys = list(['source','phen'])
-h2_i = h2.set_index(keys).index
+h2_idx = h2.set_index(keys).index
 
-reg1_i = reg1.set_index(keys).index
-comb1  = reg1[reg1_i.isin(h2_i)].merge(h2[h2_i.isin(reg1_i)], on=['source','phen'])
+df = reg_df.merge(h2, on=keys)
 
-reg2_i = reg2.set_index(keys).index
-comb2  = reg2[reg2_i.isin(h2_i)].merge(h2[h2_i.isin(reg2_i)], on=['source','phen'])
+df_tmp = df[df.reg==6].copy()
+fields = [f.replace('beta_','') for f in df_tmp.columns.values if 'beta_' in f]
+pcs = [f'PC{pc}' for pc in range(1,21)]
+non_pcs = sorted([f for f in fields if 'PC' not in f])
 
-reg3_i = reg3.set_index(keys).index
-comb3  = reg3[reg3_i.isin(h2_i)].merge(h2[h2_i.isin(reg3_i)], on=['source','phen'])
+def plot_qq(df_tmp, fields, gradient=True, logscale=False):
+    r'''
+    Makes QQ plot for fields in `fields`. Colors with gradient if `gradient`=True,
+    otherwise uses default color cycle. Plots in log-log scale if `logscale`=True.
+    '''
+    df_tmp=df_tmp.copy()
+    fig, ax = plt.subplots(figsize=(9*1.2,6*1.2))
+    exp = -np.log10(np.linspace(start=1,stop=1/df_tmp.shape[0],num=df_tmp.shape[0])) # to account for weird kink at lower end in log-log scale: -np.log10(np.linspace(start=1-1/df_tmp.shape[0],stop=1/df_tmp.shape[0],num=df_tmp.shape[0]))
+    n = len(df_tmp)
+    k = np.arange(1,n+1)
+    a = k
+    b = n+1-k
+    intervals=stats.beta.interval(0.95, a, b) # get 95% CI with parameters a and b
+    ax.plot(exp,exp,'k--')
+    plt.fill_between(x=exp[::-1], y1=-np.log10(intervals[0]), y2=-np.log10(intervals[1]), # need to reverse order of array exp to match intervals
+                    color='k', alpha=0.1)
+    
+    for i, field in enumerate(fields):
+        df_tmp[f'z_{field}'] = df_tmp[f'beta_{field}']/df_tmp[f'se_{field}']
+        df_tmp[f'nlog10p_{field}'] = -np.log10(2) - stats.norm.logcdf(-abs(df_tmp[f'z_{field}']))/np.log(10)
+        
+        rank = np.sort(df_tmp[f'nlog10p_{field}'])
+        if gradient:
+            ax.plot(exp, rank, color=plt.cm.jet(i/len(fields)))
+        else:
+            ax.plot(exp, rank)
+    if logscale:
+        plt.yscale('log')
+        plt.xscale('log')
+#    plt.ylim([min(-np.log10(intervals[0])),max(-np.log10(intervals[1]))])
+#    plt.xlim([-0.002,0.002])
+    plt.xlabel(r'expected -$log_{10}(p)$')
+    plt.ylabel(r'observed -$log_{10}(p)$')
+    plt.legend(['expected']+fields, loc=2)
+    
+    return df_tmp
 
-#combine all regression results together
-all_reg = reg1.merge(reg2,on=['source','phen'],suffixes=['_reg1','_reg2'])
-all_reg = all_reg.merge(reg3,on=['source','phen'])
 
-all_reg['r2_mul_reg1_minus_reg2'] = all_reg['r2_mul_reg1']-all_reg['r2_mul_reg2']
-all_reg['r2_mul_reg2_minus_reg3'] = all_reg['r2_mul_reg2']-all_reg['r2_mul']
-all_reg['r2_mul_reg1_minus_reg3'] = all_reg['r2_mul_reg1']-all_reg['r2_mul']
+df_tmp_pcs = plot_qq(df_tmp=df_tmp, fields=pcs, logscale=True)
+df_tmp_nonpcs = plot_qq(df_tmp=df_tmp, fields=[f for f in non_pcs if f!='intercept'],
+                        gradient=False, logscale=True)
 
-#all_reg = reg1_old.merge(reg2_old,on=['source','phen'],suffixes=['_reg1','_reg2']) #use to get old 
-#all_reg = all_reg.merge(reg3_old,on=['source','phen'])
+#for field in fields:
+#    print(f'\n--------- {field} ---------')
+#    print(df_tmp_nonpcs.sort_values(by=f'nlog10p_{field}', ascending=False)[
+#            ['phen','description',f'z_{field}',f'nlog10p_{field}']].head(10))
 
-"""
-Write combined datasets to tsv
-"""
-comb1.insert(0,'reg','reg1')
-comb2.insert(0,'reg','reg2')
-comb3.insert(0,'reg','reg3')
-df = comb1.append(comb2, sort=False).append(comb3, sort=False)
-df.to_csv('~/Documents/lab/ukbb-sexdiff/sex_linreg/ukb31063.combined_linreg_h2.tsv',sep='\t', index=False)
 
-"""
-Read combined datasets from tsv
-"""
 
-df = pd.read_csv('~/Documents/lab/ukbb-sexdiff/sex_linreg/ukb31063.combined_linreg_h2.tsv',sep='\t')
+
 
 """
 Analyze results
 """
-phsource='icd10'
+phsource='phesant'
 #get phenotypes with top 10 r2_mul
-comb1[comb1['source']==phsource].sort_values(by='r2_mul',ascending=False)[['phen','description','r2_mul','r2_adj','h2_observed']].head(10)
-comb2[comb2['source']==phsource].sort_values(by='r2_mul',ascending=False)[['phen','description','r2_mul','r2_adj','h2_observed']].head(10)
-comb3[comb3['source']==phsource].sort_values(by='r2_mul',ascending=False)[['phen','description','r2_mul','r2_adj','h2_observed']].head(10)
+df[(df['reg']==3)&(df['source']==phsource)].sort_values(by='r2_mul',ascending=False)[
+        ['phen','description','r2_mul','r2_adj','h2_observed']].head(10)
 
 #get phenotypes with top 10 r2_mul, with h2 threshold
 h2_thresh = 0.1
-comb1[comb1['source']==phsource][comb1['h2_observed']>h2_thresh].sort_values(by='r2_mul',ascending=False)[['phen','description','r2_mul','r2_adj','h2_observed']].head(10)
-comb2[comb2['source']==phsource][comb2['h2_observed']>h2_thresh].sort_values(by='r2_mul',ascending=False)[['phen','description','r2_mul','r2_adj','h2_observed']].head(10)
-comb3[comb3['source']==phsource][comb3['h2_observed']>h2_thresh].sort_values(by='r2_mul',ascending=False)[['phen','description','r2_mul','r2_adj','h2_observed']].head(10)
+df[(df['reg']==2)&(df['source']==phsource)&(df['h2_observed']>h2_thresh)].sort_values(by='r2_mul',ascending=False)[
+        ['phen','description','r2_mul','r2_adj','h2_observed']].head(10)
 
 #phenotypes with highest difference in reg1 r2_mul vs reg2 r2_mul
 all_reg[all_reg['source']==phsource].sort_values(by=['r2_mul_reg1_minus_reg2'],ascending=False)[['phen','r2_mul_reg1','r2_mul_reg2','r2_mul_reg1_minus_reg2']]
@@ -157,6 +174,11 @@ sexdiff=sexdiff.rename(index=str,columns={'phenotype':'phen'})
 reg_sexdiff=all_reg.merge(sexdiff, on='phen')
 reg_sexdiff['abs_h2_diff'] = abs(reg_sexdiff.ph1_h2_obs-reg_sexdiff.ph2_h2_obs)
 reg_sexdiff['fm_h2_diff'] = reg_sexdiff.ph1_h2_obs-reg_sexdiff.ph2_h2_obs #female_h2_obs - male_h2_obs
+
+
+
+
+
 
 """
 Plot results
