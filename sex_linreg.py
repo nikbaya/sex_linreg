@@ -30,7 +30,7 @@ paridx = args.paridx
 
 wd = 'gs://nbaya/sex_linreg/'
 
-models_to_run = [14,15] # which regression model(s) to run
+models_to_run = [3] # which regression model(s) to run
 
 print('\n####################')
 print(f'Running phenotypes from {phsource}')
@@ -54,24 +54,23 @@ phenlist = [x.replace('\"','') for x in phen_tb_all.row_value][0:]
 cov_tb =  hl.import_table('gs://ukb31063/ukb31063.neale_gwas_covariates.both_sexes.tsv.bgz',
                           key='s', impute=True, types={'s': hl.tstr})
 cov_tb = cov_tb.annotate(age = cov_tb.age - cov_tb.aggregate(hl.agg.mean(cov_tb.age))) #center age
-cov_tb = cov_tb.annotate(age_squared = cov_tb.age**2)
-cov_tb = cov_tb.annotate(age_isFemale = cov_tb.age*cov_tb.isFemale)
-cov_tb = cov_tb.annotate(age_squared_isFemale = cov_tb.age_squared*cov_tb.isFemale)
-cov_tb = cov_tb.annotate(**{f'isFemale_PC{i}':cov_tb.isFemale*cov_tb[f'PC{i}'] for i in range(1,21)})
-#add sibling info and family-based analysis indicator
-phesant_sibs = hl.import_table('gs://ukb31063/ukb31063.PHESANT_January_2019.both_sexes.tsv.bgz',
-                          missing='',key='s', impute=True, types={'s': hl.tstr}).select('1883','1873')    
-cov_tb = cov_tb.annotate(sisters = hl.int(phesant_sibs[cov_tb.s]['1883'])) # 1883: "Number of full sisters"
-cov_tb = cov_tb.annotate(brothers = hl.int(phesant_sibs[cov_tb.s]['1873'])) # 1873: "Number of full brothers"
-cov_tb = cov_tb.annotate(in_fba = 0)
-in_fba = hl.import_table('gs://nbaya/sex_linreg/ukb31063_fampairs_EURonly.tsv')
-in_fba = set(in_fba.ID1.collect()+in_fba.ID2.collect())
-cov_tb = cov_tb.annotate(in_fba = hl.literal(in_fba).contains(cov_tb['s']))
-cov_tb = cov_tb.annotate(siblings = cov_tb.brothers + cov_tb.sisters)
-cov_tb = cov_tb.annotate(brothers_minus_sisters = cov_tb.brothers - cov_tb.sisters)
-cov_tb = cov_tb.annotate(same_sex_sibs = cov_tb.isFemale*cov_tb.sisters + (~cov_tb.isFemale)*cov_tb.brothers)
-cov_tb = cov_tb.annotate(opposite_sex_sibs = (~cov_tb.isFemale*cov_tb.sisters) + (cov_tb.isFemale)*cov_tb.brothers)
-cov_tb = cov_tb.annotate(same_minus_opposite_sex_sibs = cov_tb.same_sex_sibs-cov_tb.opposite_sex_sibs)
+cov_tb = cov_tb.annotate(age_squared = cov_tb.age**2,
+                         age_isFemale = cov_tb.age*cov_tb.isFemale)
+#cov_tb = cov_tb.annotate(age_squared_isFemale = cov_tb.age_squared*cov_tb.isFemale)
+#cov_tb = cov_tb.annotate(**{f'isFemale_PC{i}':cov_tb.isFemale*cov_tb[f'PC{i}'] for i in range(1,21)})
+##add sibling info and family-based analysis indicator
+#phesant_sibs = hl.import_table('gs://ukb31063/ukb31063.PHESANT_January_2019.both_sexes.tsv.bgz',
+#                          missing='',key='s', impute=True, types={'s': hl.tstr}).select('1883','1873')    
+#cov_tb = cov_tb.annotate(sisters = hl.int(phesant_sibs[cov_tb.s]['1883']),# 1883: "Number of full sisters"
+#                         brothers = hl.int(phesant_sibs[cov_tb.s]['1873'])) # 1873: "Number of full brothers" 
+#in_fba = hl.import_table('gs://nbaya/sex_linreg/ukb31063_fampairs_EURonly.tsv')
+#in_fba = set(in_fba.ID1.collect()+in_fba.ID2.collect())
+#cov_tb = cov_tb.annotate(in_fba = hl.literal(in_fba).contains(cov_tb['s']),
+#                         siblings = cov_tb.brothers + cov_tb.sisters,
+#                         brothers_minus_sisters = cov_tb.brothers - cov_tb.sisters,
+#                         same_sex_sibs = cov_tb.isFemale*cov_tb.sisters + (~cov_tb.isFemale)*cov_tb.brothers,
+#                         opposite_sex_sibs = (~cov_tb.isFemale*cov_tb.sisters) + (cov_tb.isFemale)*cov_tb.brothers)
+#cov_tb = cov_tb.annotate(same_minus_opposite_sex_sibs = cov_tb.same_sex_sibs-cov_tb.opposite_sex_sibs)
 cov_tb.show()
 
 withdrawn = hl.import_table('gs://nbaya/w31063_20181016.csv',missing='',no_header=True).key_by('f0')
@@ -108,7 +107,6 @@ cov13 = cov6 + ['brothers_minus_sisters']
 cov14 = cov6 + ['same_sex_sibs','opposite_sex_sibs']
 cov15 = cov6 + ['same_minus_opposite_sex_sibs']
 
-
 covs = ([cov1]+[cov2]+[cov3]+[cov4]+[cov5]+[cov6]+[cov7]+[cov8]+[cov9]+[cov10]+ #get list of covariate lists; DO NOT EDIT WHEN RUNNING ONLY A SUBSET OF MODELS
         [cov11]+[cov12]+[cov13]+[cov14]+[cov15]) 
 covs = [['intercept']+cov+[f'PC{i}' for i in range(1,21)] for cov in covs] #add intercept and 20 PCs to the end of the list of covariates
@@ -121,7 +119,7 @@ dfs = [pd.DataFrame(columns=col) for col in cols] #get list of dataframes for al
 
 numphens = len(phenlist)
 
-start_idx = int((paridx-1)*numphens/args.parsplit)
+start_idx = int((paridx-1)*numphens/parsplit)
 stop_idx = int((paridx)*numphens/parsplit)
 idx = range(start_idx,stop_idx,1) #chunks all phenotypes for phsource into parsplit number of chunks, then runs on the paridx-th chunk
 
@@ -162,6 +160,7 @@ for i in idx:
                     stats = [phen]+[float('NaN')]*(2+2*(len(cov)+1))
                     print(len(stats))
                 else:
+                    print(f'phen {phen} reg{cov_i+1} r2_mul: {reg.multiple_r_squared}')
                     stats = [i for j in stats for i in j] #flatten list
                     dfs[cov_i].loc[i] = stats #enter regression result in df at index cov_i in dfs, list of dataframes
                 print(f'\nCompleted running model {cov_i+1} for phen {phen}')

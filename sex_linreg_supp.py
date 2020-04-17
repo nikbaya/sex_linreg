@@ -36,6 +36,13 @@ phsource_list = ['phesant','icd10','finngen']
 
 reg_list = list(range(1,7))
 
+reg_desc={1:'y ~ 1 + 20 PCs',
+          2:'y ~ 1 + 20 PCs + sex',
+          3:'y ~ 1 + 20 PCs + age + age^2',
+          4:'y ~ 1 + 20 PCs + sex + age + age^2',
+          5:'y ~ 1 + 20 PCs + sex + age + sex*age',
+          6:'y ~ 1 + 20 PCs + sex + age + sex*age + sex*age^2'}
+
 
 """
 Copy all sumstats from gcloud
@@ -95,7 +102,7 @@ non_pcs = sorted([f for f in fields if 'PC' not in f])
 def plot_qq(df_tmp, fields, gradient=True, logscale=False):
     r'''
     Makes QQ plot for fields in `fields`. Colors with gradient if `gradient`=True,
-    otherwise uses default color cycle. Plots in log-log scale if `logscale`=True.
+    otherwise uses default color cycle. Plots y-axis in log scale if `logscale`=True.
     '''
     df_tmp=df_tmp.copy()
     fig, ax = plt.subplots(figsize=(9*1.2,6*1.2))
@@ -122,7 +129,6 @@ def plot_qq(df_tmp, fields, gradient=True, logscale=False):
         plt.yscale('log')
         plt.xscale('log')
 #    plt.ylim([min(-np.log10(intervals[0])),max(-np.log10(intervals[1]))])
-#    plt.xlim([-0.002,0.002])
     plt.xlabel(r'expected -$log_{10}(p)$')
     plt.ylabel(r'observed -$log_{10}(p)$')
     plt.legend(['expected']+fields, loc=2)
@@ -131,22 +137,24 @@ def plot_qq(df_tmp, fields, gradient=True, logscale=False):
 
 
 df_tmp_pcs = plot_qq(df_tmp=df_tmp, fields=pcs, logscale=True)
-df_tmp_nonpcs = plot_qq(df_tmp=df_tmp, fields=[f for f in non_pcs if f!='intercept'],
+non_pc_fields= [f for f in non_pcs if f!='intercept'] # non-PC fields, excluding intercept
+df_tmp_nonpcs = plot_qq(df_tmp=df_tmp, fields=non_pc_fields,
                         gradient=False, logscale=True)
 
-#for field in fields:
-#    print(f'\n--------- {field} ---------')
-#    print(df_tmp_nonpcs.sort_values(by=f'nlog10p_{field}', ascending=False)[
-#            ['phen','description',f'z_{field}',f'nlog10p_{field}']].head(10))
+for field in non_pc_fields:
+    print(f'\n--------- {field} ---------')
+    print(df_tmp_nonpcs.sort_values(by=f'nlog10p_{field}', ascending=True)[
+            ['phen','description','n',f'z_{field}',f'nlog10p_{field}']].head(10))
 
 
 
-
-
+    
+    
 """
-Analyze results
+Inspect results
 """
 phsource='phesant'
+
 #get phenotypes with top 10 r2_mul
 df[(df['reg']==3)&(df['source']==phsource)].sort_values(by='r2_mul',ascending=False)[
         ['phen','description','r2_mul','r2_adj','h2_observed']].head(10)
@@ -183,7 +191,156 @@ reg_sexdiff['fm_h2_diff'] = reg_sexdiff.ph1_h2_obs-reg_sexdiff.ph2_h2_obs #femal
 """
 Plot results
 """
-phsource = 'finngen'
+from math import floor, ceil
+
+phsource = 'phesant'
+
+# plot histograms of R2
+field='r2_mul'
+
+fig, ax = plt.subplots(figsize=(9,9))
+bins=np.linspace(floor(min(df[field])*10)/10,ceil(max(df[field])*10)/10,
+                 int((ceil(max(df[field])*10)/10-floor(min(df[field])*10)/10)/0.02))
+for reg in reg_list:
+    ax = plt.subplot(3,2,reg)
+    plt.hist(df[(df['source']==phsource)&(df.reg==reg)][field],bins=bins)
+    plt.title(f'reg{reg}')
+#    plt.xlim([0,1])
+    plt.yscale('log')
+    plt.ylabel('count')#r'$\delta$')
+    plt.xlabel(field)
+#    plt.ylim(top=3000)
+plt.tight_layout()
+
+
+
+
+# plot histogram of R2
+reg=2
+field='r2_mul'
+plt.hist(np.log10(df[(df['source']==phsource)&(df.reg==reg)][field]),bins=50)
+plt.title(f'reg{reg}\n{reg_desc[reg]}')
+#plt.yscale('log')
+plt.xlabel(r'$\log_{10}(r^2)$')
+plt.ylabel('count')
+
+
+
+# comparison when terms are added
+
+def r2_diff_hist(df, reg1 : int, reg2 : int, logdiff=True, title=None):
+    r'''
+    Plot histpgram of r2 differences between regression models `reg1` and `reg2`
+    If `logdiff`=True, shows the log of the difference.
+    '''
+    df_reg1 = df[df.reg==reg1][['source','reg','phen','description','r2_mul','n']]
+    df_reg2 = df[df.reg==reg2][['source','reg','phen','description','r2_mul','n']]
+    df_merge = df_reg1.merge(df_reg2,on=['source','phen','description','n'],
+                               suffixes=[f'_reg{reg1}',f'_reg{reg2}'])
+    df_merge['r2_mul_diff'] = df_merge[f'r2_mul_reg{reg2}'] - df_merge[f'r2_mul_reg{reg1}']
+
+    if title is None:
+        title=f'Diff in r2: reg{reg1}->reg{reg2}'
+
+    if logdiff:
+        df_merge['log10r2_mul_diff'] = np.log10(df_merge['r2_mul_diff'])
+        field='log10r2_mul_diff'
+        isinf_ct = np.isinf(df_merge[field]).sum()
+        if isinf_ct>0:
+            title += f'\n({isinf_ct} phenotypes with no change in r2_mul)'
+        xlabel_str = r'$log_{10}(r_{sup}^2-r_{sub}^2)$' # superset r2 - subset r2 (assume that these are nested models)
+    else:
+        field='r2_mul_diff'
+        xlabel_str = r'$r_{sup}^2-r_{sub}^2$' # superset r2 - subset r2 (assume that these are nested models)
+
+    
+    plt.hist(df_merge[~np.isinf(df_merge[field])][field], bins=50)
+    plt.xlabel(xlabel_str)    
+    plt.title(title)
+    
+    return df_merge
+
+reg1to2 = r2_diff_hist(df=df, reg1=1, reg2=2, logdiff=True)
+#reg1to2 = r2_diff_hist(df=df, reg1=1, reg2=2, logdiff=False)
+
+reg3to4 = r2_diff_hist(df=df, reg1=3, reg2=4, logdiff=True)
+#reg3to4 = r2_diff_hist(df=df, reg1=3, reg2=4, logdiff=False)
+
+reg1to3 = r2_diff_hist(df=df, reg1=1, reg2=3, logdiff=True)
+#reg1to3 = r2_diff_hist(df=df, reg1=1, reg2=3, logdiff=False)
+
+reg4to5 = r2_diff_hist(df=df, reg1=4, reg2=5, logdiff=True)
+#reg4to5 = r2_diff_hist(df=df, reg1=4, reg2=5, logdiff=False)
+plt.xlim([-0.1, 0])
+
+
+             
+             
+ df_reg1 = df[df.reg==1][['source','reg','phen','description','r2_mul','r2_adj']]
+df_reg2 = df[df.reg==2][['source','reg','phen','description','r2_mul','r2_adj']]
+df_merge12 = df_reg1.merge(df_reg2,on=['source','phen','description'],
+                           suffixes=['_reg1','_reg2'])
+df_merge12['r2_adj_diff'] = df_merge12['r2_adj_reg2'] - df_merge12['r2_adj_reg1']
+
+plt.hist(df_merge12['r2_adj_diff'],bins=51)
+plt.title('r2 difference when adding sex terms (reg1 -> reg2)')
+plt.yscale('log')
+plt.savefig('/Users/nbaya/Downloads/sex_term.reg1to2.png',dpi=300)
+
+df_reg1 = df[df.reg==3][['source','reg','phen','description','r2_mul','r2_adj']]
+df_reg2 = df[df.reg==4][['source','reg','phen','description','r2_mul','r2_adj']]
+df_merge12 = df_reg1.merge(df_reg2,on=['source','phen','description'],
+                           suffixes=['_reg1','_reg2'])
+df_merge12['r2_adj_diff'] = df_merge12['r2_adj_reg2'] - df_merge12['r2_adj_reg1']
+
+plt.hist(df_merge12['r2_adj_diff'],bins=51)
+plt.title('r2 difference when adding sex terms (reg3 -> reg4)')
+#plt.title('r2 difference when adding sex terms')
+#plt.legend(['reg1 -> reg2','reg3 -> reg4'])
+plt.yscale('log')
+plt.savefig('/Users/nbaya/Downloads/sex_term.reg3to4.png',dpi=300)
+#plt.savefig('/Users/nbaya/Downloads/sex_term.reg1to2.reg3to4.png',dpi=300)
+
+
+# comparison w/ and w/o age and age^2 terms (reg1 -> reg3)
+df_reg1 = df[df.reg==1][['source','reg','phen','description','r2_mul','r2_adj']]
+df_reg2 = df[df.reg==3][['source','reg','phen','description','r2_mul','r2_adj']]
+df_merge12 = df_reg1.merge(df_reg2,on=['source','phen','description'],
+                           suffixes=['_reg1','_reg2'])
+df_merge12['r2_adj_diff'] = df_merge12['r2_adj_reg2'] - df_merge12['r2_adj_reg1']
+
+plt.hist(df_merge12['r2_adj_diff'],bins=51)
+plt.title('r2 difference when adding age, age^2 terms (reg1 -> reg3)')
+plt.yscale('log')
+plt.savefig('/Users/nbaya/Downloads/age_terms.reg1to3.png',dpi=300)
+
+
+# comparison w/ and w/o interaction terms (reg4 -> reg5)
+df_reg1 = df[df.reg==4][['source','reg','phen','description','r2_mul','r2_adj']]
+df_reg2 = df[df.reg==5][['source','reg','phen','description','r2_mul','r2_adj']]
+df_merge12 = df_reg1.merge(df_reg2,on=['source','phen','description'],
+                           suffixes=['_reg1','_reg2'])
+df_merge12['r2_adj_diff'] = df_merge12['r2_adj_reg2'] - df_merge12['r2_adj_reg1']
+
+plt.hist(df_merge12['r2_adj_diff'],bins=51)
+plt.title('r2 difference when adding interaction terms (reg4 -> reg5)')
+plt.yscale('log')
+plt.savefig('/Users/nbaya/Downloads/interaction_terms.reg4to5.png',dpi=300)
+
+
+
+# plot average incremental R2
+# (as a fraction of the total R2 of the covariates)
+
+# adding sex as covar (reg1 -> reg2, reg3 -> reg4)
+df_reg1 = df[df.reg==1]
+df_reg2 = df[df.reg==2]
+df_merge12 = df_reg1.merge(df_reg2,on=df.columns.values)
+
+# adding age, age^2 as covar (reg2 -> reg3)
+
+
+
 #plot r2_adj vs h2_observed
 for i in list(map(str,range(1,4))):
     plt.plot(df[(df['reg']=='reg'+i) & (df['source']==phsource)].r2_adj,df[(df['reg']=='reg'+i) & (df['source']==phsource)].h2_observed,'.')
